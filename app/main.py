@@ -1,18 +1,17 @@
-from fastapi import FastAPI
-from sqlalchemy import create_engine, text
 import os
-
+from fastapi import FastAPI
+from sqlalchemy import create_engine
 
 app = FastAPI(
     title="Chegou a Conta Diretora API",
     description="""
-API pública de dados educacionais para gestão escolar.
+API pública com dados educacionais de escolas brasileiras.
 
-A API fornece indicadores educacionais por escola, incluindo:
+Inclui:
+- Indicadores por escola
 - IDEB
 - INSE
-- Indicadores de rendimento
-- Séries históricas
+- Taxas de rendimento
 - Comparações com município, estado e Brasil
 
 Base de dados construída a partir de microdados públicos do INEP.
@@ -22,6 +21,24 @@ Base de dados construída a partir de microdados públicos do INEP.
     redoc_url="/guia-api"
 )
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL não foi definida")
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True
+)
+
+@app.get("/")
+def home():
+    return {
+        "api": "Chegou a Conta Diretora",
+        "status": "online",
+        "versao": "1.0.0",
+        "documentacao": "/documentacao"
+    }
 
 # conexão com banco
 DATABASE_URL = os.getenv(
