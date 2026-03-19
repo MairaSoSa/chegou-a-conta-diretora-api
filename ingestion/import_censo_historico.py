@@ -1,8 +1,10 @@
 import pandas as pd
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-engine = create_engine("postgresql+psycopg2://localhost/educacao")
+from db_config import get_sqlalchemy_engine
+
+engine = get_sqlalchemy_engine()
 
 base_dir = Path(__file__).resolve().parent.parent
 pasta = base_dir / "extracted"

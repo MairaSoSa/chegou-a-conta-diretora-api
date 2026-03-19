@@ -1,14 +1,10 @@
 import pandas as pd
-import psycopg2
 from pathlib import Path
 import json
 import re
 import unicodedata
 
-DB_NAME = "educacao"
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_USER = "mairasoaressales"
+from db_config import get_psycopg2_connection
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "extracted" / "rendimento"
@@ -55,12 +51,7 @@ def ajustar_coluna_escola(df):
     return df
 
 def main():
-    conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        host=DB_HOST,
-        port=DB_PORT
-    )
+    conn = get_psycopg2_connection()
     cur = conn.cursor()
 
     arquivos = sorted(DATA_DIR.rglob("*.xlsx"))

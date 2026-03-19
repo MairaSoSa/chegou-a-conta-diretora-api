@@ -1,12 +1,8 @@
 import pandas as pd
-import psycopg2
 from pathlib import Path
 import json
 
-DB_NAME = "educacao"
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_USER = "mairasoaressales"  # ajuste se precisar
+from db_config import get_psycopg2_connection
 
 DATA_DIR = Path("data")
 
@@ -16,12 +12,7 @@ FILES = [
 ]
 
 def main():
-    conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        host=DB_HOST,
-        port=DB_PORT
-    )
+    conn = get_psycopg2_connection()
 
     cur = conn.cursor()
 

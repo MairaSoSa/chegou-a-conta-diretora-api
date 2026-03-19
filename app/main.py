@@ -1,6 +1,7 @@
-import os
 from fastapi import FastAPI
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from app.db import engine
 
 app = FastAPI(
     title="Chegou a Conta Diretora API",
@@ -20,37 +21,6 @@ Base de dados construída a partir de microdados públicos do INEP.
     docs_url="/documentacao",
     redoc_url="/guia-api"
 )
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL não foi definida")
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True
-)
-
-@app.get("/")
-def home():
-    return {
-        "api": "Chegou a Conta Diretora",
-        "status": "online",
-        "versao": "1.0.0",
-        "documentacao": "/documentacao"
-    }
-
-# conexão com banco
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://localhost/educacao"
-)
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True
-)
-
 
 # rota inicial
 @app.get("/")
