@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 app = FastAPI(
     title="Chegou a Conta Diretora API",
