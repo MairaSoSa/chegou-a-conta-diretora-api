@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 
 from app.db import engine
@@ -1867,31 +1867,100 @@ def buscar_dashboard_escola_publica(co_entidade: int):
 # ESCOLA COMPLETA (IDENTIFICAÇÃO + CENSO + HISTÓRICO)
 @app.get("/escolas/{co_entidade}/completo")
 def buscar_escola_completa(co_entidade: int):
+    def buscar_um_registro(conn, table_name: str, ordem_coluna: str):
+        if table_name not in tabelas_disponiveis:
+            return None
+
+        row = conn.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {table_name}
+                WHERE co_entidade = :co_entidade
+                ORDER BY {ordem_coluna} DESC
+                LIMIT 1
+                """
+            ),
+            {"co_entidade": co_entidade},
+        ).mappings().first()
+
+        return dict(row) if row else None
+
+    def buscar_varios_registros(conn, table_name: str, order_by: str):
+        if table_name not in tabelas_disponiveis:
+            return []
+
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {table_name}
+                WHERE co_entidade = :co_entidade
+                ORDER BY {order_by}
+                """
+            ),
+            {"co_entidade": co_entidade},
+        ).mappings().all()
+
+        return [dict(row) for row in rows]
+
     with engine.connect() as conn:
+        tabelas_disponiveis = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                      AND table_name IN (
+                          'gestor_escolar',
+                          'matricula_escola',
+                          'turma_escola',
+                          'inse_escola',
+                          'afd_escola',
+                          'icg_escola',
+                          'rendimento_escola',
+                          'tnr_escola',
+                          'ideb_escola',
+                          'ideb_escola_historico'
+                      )
+                    """
+                )
+            )
+        }
+
         escola = conn.execute(
             text("""
                 SELECT *
-                FROM vw_raiox_escola
+                FROM censo_escola_historico
                 WHERE co_entidade = :co_entidade
+                ORDER BY ano DESC
+                LIMIT 1
             """),
             {"co_entidade": co_entidade}
         ).mappings().first()
 
         if not escola:
-            return {
-                "co_entidade": co_entidade,
-                "encontrada": False,
-                "mensagem": "Escola não encontrada.",
-                "escola": None
-            }
+            raise HTTPException(status_code=404, detail="Escola não encontrada")
 
-        censo_atual = conn.execute(
+        gestor = buscar_um_registro(conn, "gestor_escolar", "nu_ano_censo")
+        matricula = buscar_um_registro(conn, "matricula_escola", "nu_ano_censo")
+        turmas = buscar_um_registro(conn, "turma_escola", "nu_ano_censo")
+
+        inse = buscar_varios_registros(conn, "inse_escola", "ano DESC")
+        afd = buscar_varios_registros(conn, "afd_escola", "ano DESC")
+        icg = buscar_varios_registros(conn, "icg_escola", "ano DESC")
+        rendimento = buscar_varios_registros(conn, "rendimento_escola", "ano DESC")
+        tnr = buscar_varios_registros(conn, "tnr_escola", "ano DESC")
+        ideb_recente = buscar_varios_registros(conn, "ideb_escola", "ano DESC, etapa")
+        ideb_historico = buscar_varios_registros(conn, "ideb_escola_historico", "ano DESC, etapa")
+
+        escola_raiox = conn.execute(
             text("""
                 SELECT *
-                FROM censo_escolas
+                FROM vw_raiox_escola
                 WHERE co_entidade = :co_entidade
-                ORDER BY ano DESC
-                LIMIT 1
             """),
             {"co_entidade": co_entidade}
         ).mappings().first()
@@ -1907,7 +1976,7 @@ def buscar_escola_completa(co_entidade: int):
         ).mappings().all()
 
     escola_dict = dict(escola)
-    censo_dict = dict(censo_atual) if censo_atual else None
+    escola_raiox_dict = dict(escola_raiox) if escola_raiox else {}
 
     return {
         "co_entidade": co_entidade,
@@ -1917,52 +1986,170 @@ def buscar_escola_completa(co_entidade: int):
             "identificacao": {
                 "co_entidade": escola_dict.get("co_entidade"),
                 "no_entidade": escola_dict.get("no_entidade"),
+                "co_uf": escola_dict.get("co_uf"),
+                "sg_uf": escola_dict.get("sg_uf"),
+                "no_uf": escola_dict.get("no_uf"),
                 "co_municipio": escola_dict.get("co_municipio"),
                 "no_municipio": escola_dict.get("no_municipio"),
-                "sg_uf": escola_dict.get("sg_uf"),
+                "co_distrito": escola_dict.get("co_distrito"),
                 "tp_dependencia": escola_dict.get("tp_dependencia"),
                 "tp_localizacao": escola_dict.get("tp_localizacao"),
-                "tp_situacao_funcionamento": escola_dict.get("tp_situacao_funcionamento"),
-                "escola_ativa": escola_dict.get("escola_ativa"),
+                "tp_categoria_escola_privada": escola_dict.get("tp_categoria_escola_privada")
             },
-            "censo_atual": censo_dict,
+
+            "localizacao_contato": {
+                "nu_cep": escola_dict.get("nu_cep"),
+                "endereco": escola_dict.get("ds_endereco"),
+                "numero": escola_dict.get("nu_endereco"),
+                "bairro": escola_dict.get("no_bairro"),
+                "ddd": escola_dict.get("nu_ddd"),
+                "telefone": escola_dict.get("nu_telefone"),
+                "outro_telefone": escola_dict.get("nu_outro_telefone"),
+                "email": escola_dict.get("email")
+            },
+
+            "funcionamento": {
+                "ano": escola_dict.get("ano"),
+                "tp_situacao_funcionamento": escola_dict.get("tp_situacao_funcionamento"),
+                "in_escola_ativa": escola_raiox_dict.get("escola_ativa"),
+                "in_conveniada_pp": escola_dict.get("in_conveniada_pp"),
+                "in_regulamentacao": escola_dict.get("in_regulamentacao"),
+                "in_local_func_predio_escolar": escola_dict.get("in_local_func_predio_escolar"),
+                "in_local_func_salas_empresa": escola_dict.get("in_local_func_salas_empresa"),
+                "in_local_func_socioeducativo": escola_dict.get("in_local_func_unidade_socioeducativa"),
+                "in_local_func_prisional": escola_dict.get("in_local_func_unidade_prisional")
+            },
+
+            "infraestrutura_saneamento": {
+                "agua_potavel": escola_dict.get("in_agua_potavel"),
+                "agua_rede_publica": escola_dict.get("in_agua_rede_publica"),
+                "agua_poco_artesiano": escola_dict.get("in_agua_poco_artesiano"),
+                "agua_cacimba": escola_dict.get("in_agua_cacimba"),
+                "agua_fonte_rio": escola_dict.get("in_agua_fonte_rio"),
+                "agua_carro_pipa": escola_dict.get("in_agua_carro_pipa"),
+                "agua_inexistente": escola_dict.get("in_agua_inexistente"),
+                "energia_rede_publica": escola_dict.get("in_energia_rede_publica"),
+                "energia_gerador_fossil": escola_dict.get("in_energia_gerador_fossil"),
+                "energia_renovavel": escola_dict.get("in_energia_renovavel"),
+                "energia_inexistente": escola_dict.get("in_energia_inexistente"),
+                "esgoto_rede_publica": escola_dict.get("in_esgoto_rede_publica"),
+                "esgoto_fossa_septica": escola_dict.get("in_esgoto_fossa_septica"),
+                "esgoto_fossa_comum": escola_dict.get("in_esgoto_fossa_comum"),
+                "esgoto_fossa": escola_dict.get("in_esgoto_fossa"),
+                "esgoto_inexistente": escola_dict.get("in_esgoto_inexistente"),
+                "lixo_coleta_publica": escola_dict.get("in_lixo_servico_coleta"),
+                "lixo_queima": escola_dict.get("in_lixo_queima"),
+                "lixo_enterra": escola_dict.get("in_lixo_enterra"),
+                "lixo_destino_publico": escola_dict.get("in_lixo_destino_final_publico"),
+                "tratamento_lixo_separacao": escola_dict.get("in_tratamento_lixo_separacao"),
+                "tratamento_lixo_reutiliza": escola_dict.get("in_tratamento_lixo_reutiliza"),
+                "tratamento_lixo_reciclagem": escola_dict.get("in_tratamento_lixo_reciclagem")
+            },
+
+            "dependencias": {
+                "sala_diretoria": escola_dict.get("in_sala_diretoria"),
+                "sala_professor": escola_dict.get("in_sala_professor"),
+                "laboratorio_informatica": escola_dict.get("in_laboratorio_informatica"),
+                "laboratorio_ciencias": escola_dict.get("in_laboratorio_ciencias"),
+                "biblioteca": escola_dict.get("in_biblioteca"),
+                "biblioteca_sala_leitura": escola_dict.get("in_biblioteca_sala_leitura"),
+                "cozinha": escola_dict.get("in_cozinha"),
+                "refeitorio": escola_dict.get("in_refeitorio"),
+                "almoxarifado": escola_dict.get("in_almoxarifado"),
+                "auditorio": escola_dict.get("in_auditorio"),
+                "patio_coberto": escola_dict.get("in_patio_coberto"),
+                "patio_descoberto": escola_dict.get("in_patio_descoberto"),
+                "quadra_esportes": escola_dict.get("in_quadra_esportes"),
+                "quadra_esportes_coberta": escola_dict.get("in_quadra_esportes_coberta"),
+                "parque_infantil": escola_dict.get("in_parque_infantil"),
+                "banheiro": escola_dict.get("in_banheiro"),
+                "banheiro_ei": escola_dict.get("in_banheiro_ei"),
+                "banheiro_pne": escola_dict.get("in_banheiro_pne"),
+                "banheiro_funcionarios": escola_dict.get("in_banheiro_funcionarios"),
+                "dormitorio_aluno": escola_dict.get("in_dormitorio_aluno"),
+                "dormitorio_professor": escola_dict.get("in_dormitorio_professor")
+            },
+
+            "tecnologia_conectividade": {
+                "internet": escola_dict.get("in_internet"),
+                "internet_alunos": escola_dict.get("in_internet_alunos"),
+                "internet_administrativo": escola_dict.get("in_internet_administrativo"),
+                "internet_aprendizagem": escola_dict.get("in_internet_aprendizagem"),
+                "banda_larga": escola_dict.get("in_banda_larga"),
+                "computadores": escola_dict.get("in_computador"),
+                "tablet_aluno": escola_dict.get("in_tablet_aluno"),
+                "equip_tv": escola_dict.get("in_equip_tv"),
+                "equip_multimidia": escola_dict.get("in_equip_multimidia"),
+                "impressora": escola_dict.get("in_equip_impressora")
+            },
+
+            "acessibilidade": {
+                "corrimao": escola_dict.get("in_acessibilidade_corrimao"),
+                "elevador": escola_dict.get("in_acessibilidade_elevador"),
+                "pisos_tateis": escola_dict.get("in_acessibilidade_pisos_tateis"),
+                "rampas": escola_dict.get("in_acessibilidade_rampas"),
+                "sinal_visual": escola_dict.get("in_acessibilidade_sinal_visual"),
+                "acessibilidade_inexistente": escola_dict.get("in_acessibilidade_inexistente")
+            },
+
+            "alimentacao_servicos": {
+                "alimentacao_escolar": escola_dict.get("in_alimentacao"),
+                "atendimento_aee": escola_dict.get("in_atendimento_especializado"),
+                "atividade_complementar": escola_dict.get("in_atividade_complementar")
+            },
+
+            "gestao": gestor,
+            "matricula": matricula,
+            "turmas": turmas,
+
             "indicadores_recentes": {
-                "ultimo_ano_censo": escola_dict.get("ultimo_ano_censo"),
+                "ultimo_ano_censo": escola_raiox_dict.get("ultimo_ano_censo", escola_dict.get("ano")),
                 "inse": {
-                    "valor": escola_dict.get("inse_valor"),
-                    "grupo": escola_dict.get("inse_grupo"),
-                    "disponivel": bool(escola_dict.get("tem_inse")),
+                    "valor": escola_raiox_dict.get("inse_valor"),
+                    "grupo": escola_raiox_dict.get("inse_grupo"),
+                    "disponivel": bool(escola_raiox_dict.get("tem_inse")),
                 },
                 "ideb": {
                     "anos_iniciais": {
-                        "ano": escola_dict.get("ideb_ai_ano"),
-                        "valor": escola_dict.get("ideb_ai_recente"),
-                        "disponivel": escola_dict.get("ideb_ai_recente") is not None,
+                        "ano": escola_raiox_dict.get("ideb_ai_ano"),
+                        "valor": escola_raiox_dict.get("ideb_ai_recente"),
+                        "disponivel": escola_raiox_dict.get("ideb_ai_recente") is not None,
                     },
                     "anos_finais": {
-                        "ano": escola_dict.get("ideb_af_ano"),
-                        "valor": escola_dict.get("ideb_af_recente"),
-                        "disponivel": escola_dict.get("ideb_af_recente") is not None,
+                        "ano": escola_raiox_dict.get("ideb_af_ano"),
+                        "valor": escola_raiox_dict.get("ideb_af_recente"),
+                        "disponivel": escola_raiox_dict.get("ideb_af_recente") is not None,
                     },
                     "ensino_medio": {
-                        "ano": escola_dict.get("ideb_em_ano"),
-                        "valor": escola_dict.get("ideb_em_recente"),
-                        "disponivel": escola_dict.get("ideb_em_recente") is not None,
+                        "ano": escola_raiox_dict.get("ideb_em_ano"),
+                        "valor": escola_raiox_dict.get("ideb_em_recente"),
+                        "disponivel": escola_raiox_dict.get("ideb_em_recente") is not None,
                     },
                 },
                 "disponibilidade": {
-                    "tem_inse": bool(escola_dict.get("tem_inse")),
-                    "tem_afd": bool(escola_dict.get("tem_afd")),
-                    "tem_icg": bool(escola_dict.get("tem_icg")),
-                    "tem_ied": bool(escola_dict.get("tem_ied")),
-                    "tem_ird": bool(escola_dict.get("tem_ird")),
-                    "tem_atu": bool(escola_dict.get("tem_atu")),
-                    "tem_had": bool(escola_dict.get("tem_had")),
-                    "tem_tdi": bool(escola_dict.get("tem_tdi")),
-                    "tem_tnr": bool(escola_dict.get("tem_tnr")),
-                    "tem_rendimento": bool(escola_dict.get("tem_rendimento")),
+                    "tem_inse": bool(escola_raiox_dict.get("tem_inse")),
+                    "tem_afd": bool(escola_raiox_dict.get("tem_afd")),
+                    "tem_icg": bool(escola_raiox_dict.get("tem_icg")),
+                    "tem_ied": bool(escola_raiox_dict.get("tem_ied")),
+                    "tem_ird": bool(escola_raiox_dict.get("tem_ird")),
+                    "tem_atu": bool(escola_raiox_dict.get("tem_atu")),
+                    "tem_had": bool(escola_raiox_dict.get("tem_had")),
+                    "tem_tdi": bool(escola_raiox_dict.get("tem_tdi")),
+                    "tem_tnr": bool(escola_raiox_dict.get("tem_tnr")),
+                    "tem_rendimento": bool(escola_raiox_dict.get("tem_rendimento")),
                 }
             },
-            "historico": [dict(row) for row in historico_rows]
+            "indicadores": {
+                "inse": inse,
+                "afd": afd,
+                "icg": icg,
+                "rendimento": rendimento,
+                "tnr": tnr,
+                "ideb_recente": ideb_recente,
+                "ideb_historico": ideb_historico
+            },
+
+            "historico": [dict(row) for row in historico_rows],
+            "raw": escola_dict
         }
     }
