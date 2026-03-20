@@ -1862,3 +1862,107 @@ def buscar_dashboard_escola_publica(co_entidade: int):
         "avisos": avisos,
         "disponibilidade": disponibilidade
     }
+
+
+# ESCOLA COMPLETA (IDENTIFICAÇÃO + CENSO + HISTÓRICO)
+@app.get("/escolas/{co_entidade}/completo")
+def buscar_escola_completa(co_entidade: int):
+    with engine.connect() as conn:
+        escola = conn.execute(
+            text("""
+                SELECT *
+                FROM vw_raiox_escola
+                WHERE co_entidade = :co_entidade
+            """),
+            {"co_entidade": co_entidade}
+        ).mappings().first()
+
+        if not escola:
+            return {
+                "co_entidade": co_entidade,
+                "encontrada": False,
+                "mensagem": "Escola não encontrada.",
+                "escola": None
+            }
+
+        censo_atual = conn.execute(
+            text("""
+                SELECT *
+                FROM censo_escolas
+                WHERE co_entidade = :co_entidade
+                ORDER BY ano DESC
+                LIMIT 1
+            """),
+            {"co_entidade": co_entidade}
+        ).mappings().first()
+
+        historico_rows = conn.execute(
+            text("""
+                SELECT *
+                FROM vw_escola_indicadores
+                WHERE co_entidade = :co_entidade
+                ORDER BY ano
+            """),
+            {"co_entidade": co_entidade}
+        ).mappings().all()
+
+    escola_dict = dict(escola)
+    censo_dict = dict(censo_atual) if censo_atual else None
+
+    return {
+        "co_entidade": co_entidade,
+        "encontrada": True,
+        "mensagem": "Consulta realizada com sucesso.",
+        "escola": {
+            "identificacao": {
+                "co_entidade": escola_dict.get("co_entidade"),
+                "no_entidade": escola_dict.get("no_entidade"),
+                "co_municipio": escola_dict.get("co_municipio"),
+                "no_municipio": escola_dict.get("no_municipio"),
+                "sg_uf": escola_dict.get("sg_uf"),
+                "tp_dependencia": escola_dict.get("tp_dependencia"),
+                "tp_localizacao": escola_dict.get("tp_localizacao"),
+                "tp_situacao_funcionamento": escola_dict.get("tp_situacao_funcionamento"),
+                "escola_ativa": escola_dict.get("escola_ativa"),
+            },
+            "censo_atual": censo_dict,
+            "indicadores_recentes": {
+                "ultimo_ano_censo": escola_dict.get("ultimo_ano_censo"),
+                "inse": {
+                    "valor": escola_dict.get("inse_valor"),
+                    "grupo": escola_dict.get("inse_grupo"),
+                    "disponivel": bool(escola_dict.get("tem_inse")),
+                },
+                "ideb": {
+                    "anos_iniciais": {
+                        "ano": escola_dict.get("ideb_ai_ano"),
+                        "valor": escola_dict.get("ideb_ai_recente"),
+                        "disponivel": escola_dict.get("ideb_ai_recente") is not None,
+                    },
+                    "anos_finais": {
+                        "ano": escola_dict.get("ideb_af_ano"),
+                        "valor": escola_dict.get("ideb_af_recente"),
+                        "disponivel": escola_dict.get("ideb_af_recente") is not None,
+                    },
+                    "ensino_medio": {
+                        "ano": escola_dict.get("ideb_em_ano"),
+                        "valor": escola_dict.get("ideb_em_recente"),
+                        "disponivel": escola_dict.get("ideb_em_recente") is not None,
+                    },
+                },
+                "disponibilidade": {
+                    "tem_inse": bool(escola_dict.get("tem_inse")),
+                    "tem_afd": bool(escola_dict.get("tem_afd")),
+                    "tem_icg": bool(escola_dict.get("tem_icg")),
+                    "tem_ied": bool(escola_dict.get("tem_ied")),
+                    "tem_ird": bool(escola_dict.get("tem_ird")),
+                    "tem_atu": bool(escola_dict.get("tem_atu")),
+                    "tem_had": bool(escola_dict.get("tem_had")),
+                    "tem_tdi": bool(escola_dict.get("tem_tdi")),
+                    "tem_tnr": bool(escola_dict.get("tem_tnr")),
+                    "tem_rendimento": bool(escola_dict.get("tem_rendimento")),
+                }
+            },
+            "historico": [dict(row) for row in historico_rows]
+        }
+    }
