@@ -1933,7 +1933,7 @@ def buscar_escola_completa(co_entidade: int):
         escola = conn.execute(
             text("""
                 SELECT *
-                FROM censo_escola_historico
+                FROM censo_escolas
                 WHERE co_entidade = :co_entidade
                 ORDER BY ano DESC
                 LIMIT 1
@@ -1995,6 +1995,15 @@ def buscar_escola_completa(co_entidade: int):
                 "tp_dependencia": escola_dict.get("tp_dependencia"),
                 "tp_localizacao": escola_dict.get("tp_localizacao"),
                 "tp_categoria_escola_privada": escola_dict.get("tp_categoria_escola_privada")
+            },
+
+            "regionalizacao": {
+                "co_regiao": escola_dict.get("co_regiao"),
+                "no_regiao": escola_dict.get("no_regiao"),
+                "co_mesorregiao": escola_dict.get("co_mesorregiao"),
+                "no_mesorregiao": escola_dict.get("no_mesorregiao"),
+                "co_microrregiao": escola_dict.get("co_microrregiao"),
+                "no_microrregiao": escola_dict.get("no_microrregiao")
             },
 
             "localizacao_contato": {
@@ -2096,6 +2105,34 @@ def buscar_escola_completa(co_entidade: int):
                 "alimentacao_escolar": escola_dict.get("in_alimentacao"),
                 "atendimento_aee": escola_dict.get("in_atendimento_especializado"),
                 "atividade_complementar": escola_dict.get("in_atividade_complementar")
+            },
+
+            "estrutura": {
+                "matriculas": {
+                    "qt_mat_bas": escola_dict.get("qt_mat_bas"),
+                    "qt_mat_inf": escola_dict.get("qt_mat_inf"),
+                    "qt_mat_fund": escola_dict.get("qt_mat_fund"),
+                    "qt_mat_med": escola_dict.get("qt_mat_med"),
+                    "qt_mat_eja": escola_dict.get("qt_mat_eja")
+                },
+                "docentes": {
+                    "qt_doc_bas": escola_dict.get("qt_doc_bas"),
+                    "qt_doc_inf": escola_dict.get("qt_doc_inf"),
+                    "qt_doc_fund": escola_dict.get("qt_doc_fund"),
+                    "qt_doc_med": escola_dict.get("qt_doc_med")
+                },
+                "turmas": {
+                    "qt_tur_bas": escola_dict.get("qt_tur_bas"),
+                    "qt_tur_inf": escola_dict.get("qt_tur_inf"),
+                    "qt_tur_fund": escola_dict.get("qt_tur_fund"),
+                    "qt_tur_med": escola_dict.get("qt_tur_med")
+                }
+            },
+
+            "capacidade_fisica": {
+                "qt_salas_utilizadas": escola_dict.get("qt_salas_utilizadas"),
+                "qt_salas_utilizadas_dentro": escola_dict.get("qt_salas_utilizadas_dentro"),
+                "qt_salas_utilizadas_fora": escola_dict.get("qt_salas_utilizadas_fora")
             },
 
             "gestao": gestor,
