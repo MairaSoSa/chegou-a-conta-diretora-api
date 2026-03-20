@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from sqlalchemy import text
+from typing import Optional
 
 from app.db import engine
 
@@ -2189,4 +2190,130 @@ def buscar_escola_completa(co_entidade: int):
             "historico": [dict(row) for row in historico_rows],
             "raw": escola_dict
         }
+    }
+
+
+# AFD - ADEQUAÇÃO DA FORMAÇÃO DOCENTE
+
+@app.get("/afd")
+def listar_afd(
+    ano: Optional[int] = Query(None, description="Filtrar por ano"),
+    limit: int = Query(100, ge=1, le=10000, description="Máximo de registros"),
+    offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
+):
+    """
+    Retorna todos os registros de AFD (Adequação da Formação Docente) do banco.
+    Suporta filtro por ano e paginação.
+    """
+    with engine.connect() as conn:
+        filters = "WHERE ano = :ano" if ano else ""
+        params = {"ano": ano, "limit": limit, "offset": offset}
+
+        total_result = conn.execute(
+            text(f"SELECT COUNT(*) FROM afd_escola {filters}"),
+            params,
+        )
+        total = total_result.scalar()
+
+        rows = conn.execute(
+            text(f"""
+                SELECT ano, co_entidade, dados_json
+                FROM afd_escola
+                {filters}
+                ORDER BY ano DESC, co_entidade
+                LIMIT :limit OFFSET :offset
+            """),
+            params,
+        ).mappings().all()
+
+    return {
+        "indicador": "AFD",
+        "descricao": "Adequação da Formação Docente",
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "registros": [
+            {
+                "ano": row["ano"],
+                "co_entidade": row["co_entidade"],
+                **row["dados_json"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.get("/afd/{co_entidade}")
+def buscar_afd_escola(co_entidade: int):
+    """
+    Retorna todos os registros de AFD de uma escola específica, ordenados por ano.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT ano, co_entidade, dados_json
+                FROM afd_escola
+                WHERE co_entidade = :co_entidade
+                ORDER BY ano DESC
+            """),
+            {"co_entidade": co_entidade},
+        ).mappings().all()
+
+    if not rows:
+        return {
+            "co_entidade": co_entidade,
+            "indicador": "AFD",
+            "encontrado": False,
+            "mensagem": "Nenhum dado de AFD encontrado para esta escola.",
+            "registros": [],
+        }
+
+    return {
+        "co_entidade": co_entidade,
+        "indicador": "AFD",
+        "descricao": "Adequação da Formação Docente",
+        "encontrado": True,
+        "total_anos": len(rows),
+        "registros": [
+            {
+                "ano": row["ano"],
+                **row["dados_json"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.get("/afd/{co_entidade}/{ano}")
+def buscar_afd_escola_ano(co_entidade: int, ano: int):
+    """
+    Retorna o registro de AFD de uma escola para um ano específico.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT ano, co_entidade, dados_json
+                FROM afd_escola
+                WHERE co_entidade = :co_entidade
+                  AND ano = :ano
+            """),
+            {"co_entidade": co_entidade, "ano": ano},
+        ).mappings().first()
+
+    if not row:
+        return {
+            "co_entidade": co_entidade,
+            "ano": ano,
+            "indicador": "AFD",
+            "encontrado": False,
+            "mensagem": f"Nenhum dado de AFD encontrado para esta escola no ano {ano}.",
+        }
+
+    return {
+        "co_entidade": co_entidade,
+        "ano": ano,
+        "indicador": "AFD",
+        "descricao": "Adequação da Formação Docente",
+        "encontrado": True,
+        "dados": row["dados_json"],
     }
