@@ -233,7 +233,7 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
                 ) VALUES (
                     :ano, :co_entidade, :no_entidade, :co_municipio, :no_municipio,
                     :sg_uf, :tp_dependencia, :tp_localizacao, :tp_situacao_funcionamento,
-                    :dados_json::jsonb
+                    CAST(:dados_json AS jsonb)
                 )
                 ON CONFLICT (ano, co_entidade) DO UPDATE SET
                     no_entidade               = EXCLUDED.no_entidade,
@@ -274,7 +274,7 @@ def importar_upsert(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
                 })
             conn.execute(text(f"""
                 INSERT INTO {tabela} (ano, co_entidade, dados_json)
-                VALUES (:ano, :co_entidade, :dados_json::jsonb)
+                VALUES (:ano, :co_entidade, CAST(:dados_json AS jsonb))
                 ON CONFLICT (ano, co_entidade) DO UPDATE SET
                     dados_json = EXCLUDED.dados_json
             """), registros)
@@ -312,7 +312,7 @@ def importar_multiplos(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
                 })
             conn.execute(text(f"""
                 INSERT INTO {tabela} (ano, co_entidade, dados_json)
-                VALUES (:ano, :co_entidade, :dados_json::jsonb)
+                VALUES (:ano, :co_entidade, CAST(:dados_json AS jsonb))
             """), registros)
             inseridos += len(registros)
             print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")

@@ -1,0 +1,123 @@
+mairasoaressales@MacBook-Pro-de-Maira ingestion % DATABASE_URL="postgresql://postgres:fGOMFFDHZRqNDuMQdBUAgtUEQpuurxlv@hopper.proxy.rlwy.net:24550/railway" python3 import_censo_completo.py
+Arquivos encontrados: 18
+  [docente    → docente_escola] Tabela_Docente_2025.csv
+  [escola     → censo_escola_historico] Tabela_Escola_2025.csv
+  [gestor     → gestor_escolar] Tabela_Gestor_Escolar_2025.csv
+  [matricula  → matricula_escola] Tabela_Matricula_2025.csv
+  [turma      → turma_escola] Tabela_Turma_2025.csv
+  [escola     → censo_escola_historico] microdados_ed_basica_2022.csv
+  [escola     → censo_escola_historico] microdados_ed_basica_2023.csv
+  [desconhecido → ?] suplemento_cursos_tecnicos_2023.csv
+  [escola     → censo_escola_historico] microdados_ed_basica_2024.csv
+  [desconhecido → ?] suplemento_cursos_tecnicos_2024.csv
+  [desconhecido → ?] Tabela_Curso_Tecnico_2025.csv
+  [docente    → docente_escola] Tabela_Docente_2025.csv
+  [escola     → censo_escola_historico] Tabela_Escola_2025.csv
+  [gestor     → gestor_escolar] Tabela_Gestor_Escolar_2025.csv
+  [matricula  → matricula_escola] Tabela_Matricula_2025.csv
+  [turma      → turma_escola] Tabela_Turma_2025.csv
+  [escola     → censo_escola_historico] microdados_ed_basica_2020.CSV
+  [escola     → censo_escola_historico] microdados_ed_basica_2021.csv
+
+
+→ Tabela_Docente_2025.csv
+  Tipo: docente | Tabela destino: docente_escola
+  Anos no arquivo: ['2025'] | Colunas: 156 | Linhas: 178,772
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1936, in _exec_single_context
+    self.dialect.do_executemany(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor,
+        ^^^^^^^
+    ...<2 lines>...
+        context,
+        ^^^^^^^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/dialects/postgresql/psycopg2.py", line 800, in do_executemany
+    cursor.executemany(statement, parameters)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+psycopg2.errors.SyntaxError: syntax error at or near ":"
+LINE 3:                 VALUES (2025, 11000023, :dados_json::jsonb)
+                                                ^
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/mairasoaressales/Downloads/educacao/backend/ingestion/import_censo_completo.py", line 393, in <module>
+    main()
+    ~~~~^^
+  File "/Users/mairasoaressales/Downloads/educacao/backend/ingestion/import_censo_completo.py", line 385, in main
+    total_geral += processar_arquivo(caminho)
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/mairasoaressales/Downloads/educacao/backend/ingestion/import_censo_completo.py", line 355, in processar_arquivo
+    n = fn_importar(df, caminho, tabela)
+  File "/Users/mairasoaressales/Downloads/educacao/backend/ingestion/import_censo_completo.py", line 303, in importar_multiplos
+    conn.execute(text(f"""
+    ~~~~~~~~~~~~^^^^^^^^^^
+        INSERT INTO {tabela} (ano, co_entidade, dados_json)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        VALUES (:ano, :co_entidade, :dados_json::jsonb)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    """), registros)
+    ^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1936, in _exec_single_context
+    self.dialect.do_executemany(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor,
+        ^^^^^^^
+    ...<2 lines>...
+        context,
+        ^^^^^^^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sqlalchemy/dialects/postgresql/psycopg2.py", line 800, in do_executemany
+    cursor.executemany(statement, parameters)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.SyntaxError) syntax error at or near ":"
+LINE 3:                 VALUES (2025, 11000023, :dados_json::jsonb)
+                                                ^
+
+[SQL: 
+                INSERT INTO docente_escola (ano, co_entidade, dados_json)
+                VALUES (%(ano)s, %(co_entidade)s, :dados_json::jsonb)
+            ]
+[parameters: [{'ano': 2025, 'co_entidade': 11000023}, {'ano': 2025, 'co_entidade': 11000040}, {'ano': 2025, 'co_entidade': 11000058}, {'ano': 2025, 'co_entidade': 11000104}, {'ano': 2025, 'co_entidade': 11000198}, {'ano': 2025, 'co_entidade': 11000201}, {'ano': 2025, 'co_entidade': 11000252}, {'ano': 2025, 'co_entidade': 11000260}  ... displaying 10 of 2000 total bound parameter sets ...  {'ano': 2025, 'co_entidade': 12021920}, {'ano': 2025, 'co_entidade': 12021962}]]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+mairasoaressales@MacBook-Pro-de-Maira ingestion % 
