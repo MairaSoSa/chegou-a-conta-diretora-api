@@ -2317,3 +2317,196 @@ def buscar_afd_escola_ano(co_entidade: int, ano: int):
         "encontrado": True,
         "dados": row["dados_json"],
     }
+
+
+# CENSO ESCOLAR — DADOS COMPLETOS
+
+@app.get("/censo")
+def listar_censo(
+    ano: Optional[int] = Query(None, description="Filtrar por ano"),
+    sg_uf: Optional[str] = Query(None, description="Filtrar por UF (ex: SP)"),
+    co_municipio: Optional[int] = Query(None, description="Filtrar por código do município"),
+    tp_dependencia: Optional[int] = Query(None, description="1=Federal 2=Estadual 3=Municipal 4=Privada"),
+    limit: int = Query(100, ge=1, le=10000, description="Máximo de registros"),
+    offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
+):
+    """
+    Lista registros do Censo Escolar com todos os dados disponíveis.
+    Suporta filtros por ano, UF, município e dependência administrativa.
+    """
+    conditions = []
+    params: dict = {"limit": limit, "offset": offset}
+
+    if ano:
+        conditions.append("ano = :ano")
+        params["ano"] = ano
+    if sg_uf:
+        conditions.append("sg_uf = :sg_uf")
+        params["sg_uf"] = sg_uf.upper()
+    if co_municipio:
+        conditions.append("co_municipio = :co_municipio")
+        params["co_municipio"] = co_municipio
+    if tp_dependencia:
+        conditions.append("tp_dependencia = :tp_dependencia")
+        params["tp_dependencia"] = tp_dependencia
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    with engine.connect() as conn:
+        total = conn.execute(
+            text(f"SELECT COUNT(*) FROM censo_escola_historico {where}"), params
+        ).scalar()
+
+        rows = conn.execute(
+            text(f"""
+                SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
+                       sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+                       dados_json
+                FROM censo_escola_historico
+                {where}
+                ORDER BY ano DESC, co_entidade
+                LIMIT :limit OFFSET :offset
+            """),
+            params,
+        ).mappings().all()
+
+    anos_disponiveis = None
+    if not ano:
+        with engine.connect() as conn:
+            anos_rows = conn.execute(
+                text("SELECT DISTINCT ano FROM censo_escola_historico ORDER BY ano")
+            ).fetchall()
+            anos_disponiveis = [r[0] for r in anos_rows]
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "anos_disponiveis": anos_disponiveis,
+        "registros": [
+            {
+                "ano": r["ano"],
+                "co_entidade": r["co_entidade"],
+                "no_entidade": r["no_entidade"],
+                "co_municipio": r["co_municipio"],
+                "no_municipio": r["no_municipio"],
+                "sg_uf": r["sg_uf"],
+                "tp_dependencia": r["tp_dependencia"],
+                "tp_localizacao": r["tp_localizacao"],
+                "tp_situacao_funcionamento": r["tp_situacao_funcionamento"],
+                **(r["dados_json"] if r["dados_json"] else {}),
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/censo/anos")
+def listar_anos_censo():
+    """
+    Retorna os anos disponíveis no censo e a quantidade de escolas por ano.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT ano, COUNT(*) as qtd_escolas
+                FROM censo_escola_historico
+                GROUP BY ano
+                ORDER BY ano
+            """)
+        ).fetchall()
+
+    return {
+        "anos": [{"ano": r[0], "qtd_escolas": r[1]} for r in rows],
+        "total_anos": len(rows),
+    }
+
+
+@app.get("/censo/{co_entidade}")
+def buscar_censo_escola(co_entidade: int):
+    """
+    Retorna o histórico completo do Censo Escolar de uma escola,
+    com todos os dados disponíveis para cada ano.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
+                       sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+                       dados_json
+                FROM censo_escola_historico
+                WHERE co_entidade = :co_entidade
+                ORDER BY ano DESC
+            """),
+            {"co_entidade": co_entidade},
+        ).mappings().all()
+
+    if not rows:
+        return {
+            "co_entidade": co_entidade,
+            "encontrado": False,
+            "mensagem": "Nenhum dado do censo encontrado para esta escola.",
+            "historico": [],
+        }
+
+    return {
+        "co_entidade": co_entidade,
+        "no_entidade": rows[0]["no_entidade"],
+        "encontrado": True,
+        "total_anos": len(rows),
+        "historico": [
+            {
+                "ano": r["ano"],
+                "co_municipio": r["co_municipio"],
+                "no_municipio": r["no_municipio"],
+                "sg_uf": r["sg_uf"],
+                "tp_dependencia": r["tp_dependencia"],
+                "tp_localizacao": r["tp_localizacao"],
+                "tp_situacao_funcionamento": r["tp_situacao_funcionamento"],
+                **(r["dados_json"] if r["dados_json"] else {}),
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/censo/{co_entidade}/{ano}")
+def buscar_censo_escola_ano(co_entidade: int, ano: int):
+    """
+    Retorna todos os dados do Censo Escolar de uma escola em um ano específico.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
+                       sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+                       dados_json
+                FROM censo_escola_historico
+                WHERE co_entidade = :co_entidade AND ano = :ano
+            """),
+            {"co_entidade": co_entidade, "ano": ano},
+        ).mappings().first()
+
+    if not row:
+        return {
+            "co_entidade": co_entidade,
+            "ano": ano,
+            "encontrado": False,
+            "mensagem": f"Nenhum dado do censo encontrado para esta escola no ano {ano}.",
+        }
+
+    return {
+        "co_entidade": co_entidade,
+        "ano": ano,
+        "encontrado": True,
+        "dados": {
+            "no_entidade": row["no_entidade"],
+            "co_municipio": row["co_municipio"],
+            "no_municipio": row["no_municipio"],
+            "sg_uf": row["sg_uf"],
+            "tp_dependencia": row["tp_dependencia"],
+            "tp_localizacao": row["tp_localizacao"],
+            "tp_situacao_funcionamento": row["tp_situacao_funcionamento"],
+            **(row["dados_json"] if row["dados_json"] else {}),
+        },
+    }
