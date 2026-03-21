@@ -2510,3 +2510,96 @@ def buscar_censo_escola_ano(co_entidade: int, ano: int):
             **(row["dados_json"] if row["dados_json"] else {}),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# MATRÍCULA
+# ---------------------------------------------------------------------------
+
+def _endpoint_upsert_tabela(tabela: str, co_entidade: int, ano: Optional[int]):
+    """Helper para endpoints de tabelas com PK (ano, co_entidade)."""
+    with engine.connect() as conn:
+        if ano:
+            row = conn.execute(
+                text(f"SELECT ano, co_entidade, dados_json FROM {tabela} WHERE co_entidade = :e AND ano = :a"),
+                {"e": co_entidade, "a": ano},
+            ).mappings().first()
+            if not row:
+                return {"co_entidade": co_entidade, "ano": ano, "encontrado": False, "dados": None}
+            return {"co_entidade": co_entidade, "ano": ano, "encontrado": True,
+                    "dados": row["dados_json"] or {}}
+        else:
+            rows = conn.execute(
+                text(f"SELECT ano, co_entidade, dados_json FROM {tabela} WHERE co_entidade = :e ORDER BY ano DESC"),
+                {"e": co_entidade},
+            ).mappings().all()
+            if not rows:
+                return {"co_entidade": co_entidade, "encontrado": False, "historico": []}
+            return {
+                "co_entidade": co_entidade,
+                "encontrado": True,
+                "total_anos": len(rows),
+                "historico": [{"ano": r["ano"], **(r["dados_json"] or {})} for r in rows],
+            }
+
+
+def _endpoint_multiplos_tabela(tabela: str, co_entidade: int, ano: Optional[int], limit: int, offset: int):
+    """Helper para endpoints de tabelas com múltiplos registros por escola (docente, turma)."""
+    conditions = ["co_entidade = :e"]
+    params: dict = {"e": co_entidade, "limit": limit, "offset": offset}
+    if ano:
+        conditions.append("ano = :a")
+        params["a"] = ano
+    where = "WHERE " + " AND ".join(conditions)
+
+    with engine.connect() as conn:
+        total = conn.execute(text(f"SELECT COUNT(*) FROM {tabela} {where}"), params).scalar()
+        rows = conn.execute(
+            text(f"SELECT ano, co_entidade, dados_json FROM {tabela} {where} ORDER BY ano DESC LIMIT :limit OFFSET :offset"),
+            params,
+        ).mappings().all()
+
+    if total == 0:
+        return {"co_entidade": co_entidade, "encontrado": False, "total": 0, "registros": []}
+    return {
+        "co_entidade": co_entidade,
+        "encontrado": True,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "registros": [{"ano": r["ano"], **(r["dados_json"] or {})} for r in rows],
+    }
+
+
+@app.get("/matricula/{co_entidade}")
+def buscar_matricula(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Dados de matrícula de uma escola. Use ?ano= para filtrar por ano específico."""
+    return _endpoint_upsert_tabela("matricula_escola", co_entidade, ano)
+
+
+@app.get("/gestor/{co_entidade}")
+def buscar_gestor(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Dados do gestor escolar. Use ?ano= para filtrar por ano específico."""
+    return _endpoint_upsert_tabela("gestor_escolar", co_entidade, ano)
+
+
+@app.get("/docentes/{co_entidade}")
+def buscar_docentes(
+    co_entidade: int,
+    ano: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+):
+    """Lista de docentes de uma escola. Use ?ano= para filtrar por ano."""
+    return _endpoint_multiplos_tabela("docente_escola", co_entidade, ano, limit, offset)
+
+
+@app.get("/turmas/{co_entidade}")
+def buscar_turmas(
+    co_entidade: int,
+    ano: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+):
+    """Lista de turmas de uma escola. Use ?ano= para filtrar por ano."""
+    return _endpoint_multiplos_tabela("turma_escola", co_entidade, ano, limit, offset)
