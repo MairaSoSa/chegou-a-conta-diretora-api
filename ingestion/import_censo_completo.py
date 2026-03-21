@@ -27,11 +27,21 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
-from db_config import get_sqlalchemy_engine
-
-engine = get_sqlalchemy_engine()
+# Tenta usar db_config se disponível; caso contrário usa DATABASE_URL diretamente
+try:
+    from db_config import get_sqlalchemy_engine
+    engine = get_sqlalchemy_engine()
+except ModuleNotFoundError:
+    import os
+    _url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+    if not _url:
+        print("ERRO: defina DATABASE_URL antes de rodar o script.")
+        sys.exit(1)
+    if _url.startswith("postgres://"):
+        _url = _url.replace("postgres://", "postgresql://", 1)
+    engine = create_engine(_url, pool_pre_ping=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PASTA = BASE_DIR / "extracted"
