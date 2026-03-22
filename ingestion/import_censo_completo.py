@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from psycopg2.extras import execute_values
 from sqlalchemy import create_engine, text
 
 # Tenta usar db_config se disponível; caso contrário usa DATABASE_URL diretamente
@@ -46,7 +47,7 @@ except ModuleNotFoundError:
 BASE_DIR = Path(__file__).resolve().parent.parent
 PASTA = BASE_DIR / "extracted"
 
-TAMANHO_LOTE = 2000
+TAMANHO_LOTE = 10_000
 
 # Mapeamentos de colunas estruturadas (usadas em censo_escola_historico)
 MAPA_COLUNAS_ESCOLA = {
@@ -107,6 +108,22 @@ def row_para_json(row: pd.Series) -> str:
         ensure_ascii=False,
         default=str,
     )
+
+
+def df_para_json_bulk(df: pd.DataFrame, excluir: list) -> list:
+    """Converte todas as linhas do df para lista de JSON strings de forma vetorizada."""
+    cols_drop = [c for c in excluir if c in df.columns]
+    records = df.drop(columns=cols_drop).to_dict(orient="records")
+    return [
+        json.dumps({k: limpar_valor(v) for k, v in r.items()}, ensure_ascii=False, default=str)
+        for r in records
+    ]
+
+
+def _raw_cursor():
+    """Retorna (raw_conn, cursor) psycopg2 a partir do engine SQLAlchemy."""
+    raw = engine.raw_connection()
+    return raw, raw.cursor()
 
 
 def val_int(row, col):
@@ -217,61 +234,57 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
     col_ddd  = gc("nu_ddd")
     col_tel  = gc("nu_telefone")
 
-    inseridos = 0
-    with engine.begin() as conn:
-        for i in range(0, total, TAMANHO_LOTE):
-            lote = df.iloc[i: i + TAMANHO_LOTE]
-            registros = []
-            for _, row in lote.iterrows():
-                dados = {k: v for k, v in row.items() if k != "_ano"}
-                registros.append({
-                    "ano":                        int(row["_ano"]),
-                    "co_entidade":                int(row[col_entidade]),
-                    "no_entidade":                val_str(row, col_no),
-                    "co_municipio":               val_int(row, col_mun),
-                    "no_municipio":               val_str(row, col_nom),
-                    "sg_uf":                      val_str(row, col_uf),
-                    "tp_dependencia":             val_int(row, col_dep),
-                    "tp_localizacao":             val_int(row, col_loc),
-                    "tp_situacao_funcionamento":  val_int(row, col_sit),
-                    "ds_endereco":                val_str(row, col_end),
-                    "no_bairro":                  val_str(row, col_bai),
-                    "co_cep":                     val_str(row, col_cep),
-                    "nu_ddd":                     val_str(row, col_ddd),
-                    "nu_telefone":                val_str(row, col_tel),
-                    "dados_json":                 row_para_json(pd.Series(dados)),
-                })
-            conn.execute(text("""
-                INSERT INTO censo_escola_historico (
-                    ano, co_entidade, no_entidade, co_municipio, no_municipio,
-                    sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
-                    ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone,
-                    dados_json
-                ) VALUES (
-                    :ano, :co_entidade, :no_entidade, :co_municipio, :no_municipio,
-                    :sg_uf, :tp_dependencia, :tp_localizacao, :tp_situacao_funcionamento,
-                    :ds_endereco, :no_bairro, :co_cep, :nu_ddd, :nu_telefone,
-                    CAST(:dados_json AS jsonb)
-                )
-                ON CONFLICT (ano, co_entidade) DO UPDATE SET
-                    no_entidade               = EXCLUDED.no_entidade,
-                    co_municipio              = EXCLUDED.co_municipio,
-                    no_municipio              = EXCLUDED.no_municipio,
-                    sg_uf                     = EXCLUDED.sg_uf,
-                    tp_dependencia            = EXCLUDED.tp_dependencia,
-                    tp_localizacao            = EXCLUDED.tp_localizacao,
-                    tp_situacao_funcionamento = EXCLUDED.tp_situacao_funcionamento,
-                    ds_endereco               = EXCLUDED.ds_endereco,
-                    no_bairro                 = EXCLUDED.no_bairro,
-                    co_cep                    = EXCLUDED.co_cep,
-                    nu_ddd                    = EXCLUDED.nu_ddd,
-                    nu_telefone               = EXCLUDED.nu_telefone,
-                    dados_json                = EXCLUDED.dados_json
-            """), registros)
-            inseridos += len(registros)
-            print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")
+    # Constrói JSON de todas as linhas de uma vez (muito mais rápido que iterrows)
+    jsons = df_para_json_bulk(df, excluir=["_ano"])
 
-    return inseridos
+    SQL_ESCOLA = """
+        INSERT INTO censo_escola_historico (
+            ano, co_entidade, no_entidade, co_municipio, no_municipio,
+            sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+            ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone, dados_json
+        ) VALUES %s
+        ON CONFLICT (ano, co_entidade) DO UPDATE SET
+            no_entidade               = EXCLUDED.no_entidade,
+            co_municipio              = EXCLUDED.co_municipio,
+            no_municipio              = EXCLUDED.no_municipio,
+            sg_uf                     = EXCLUDED.sg_uf,
+            tp_dependencia            = EXCLUDED.tp_dependencia,
+            tp_localizacao            = EXCLUDED.tp_localizacao,
+            tp_situacao_funcionamento = EXCLUDED.tp_situacao_funcionamento,
+            ds_endereco               = EXCLUDED.ds_endereco,
+            no_bairro                 = EXCLUDED.no_bairro,
+            co_cep                    = EXCLUDED.co_cep,
+            nu_ddd                    = EXCLUDED.nu_ddd,
+            nu_telefone               = EXCLUDED.nu_telefone,
+            dados_json                = EXCLUDED.dados_json
+    """
+
+    data = [
+        (
+            int(row["_ano"]), int(row[col_entidade]),
+            val_str(row, col_no), val_int(row, col_mun), val_str(row, col_nom),
+            val_str(row, col_uf), val_int(row, col_dep), val_int(row, col_loc),
+            val_int(row, col_sit), val_str(row, col_end), val_str(row, col_bai),
+            val_str(row, col_cep), val_str(row, col_ddd), val_str(row, col_tel),
+            jsons[i],
+        )
+        for i, (_, row) in enumerate(df.iterrows())
+    ]
+
+    raw_conn, cursor = _raw_cursor()
+    try:
+        for i in range(0, total, TAMANHO_LOTE):
+            execute_values(cursor, SQL_ESCOLA, data[i: i + TAMANHO_LOTE],
+                           template="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                           page_size=TAMANHO_LOTE)
+            inseridos = min(i + TAMANHO_LOTE, total)
+            print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")
+        raw_conn.commit()
+    finally:
+        cursor.close()
+        raw_conn.close()
+
+    return total
 
 
 def importar_upsert(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
@@ -282,29 +295,30 @@ def importar_upsert(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
 
     df = df.drop_duplicates(subset=["_ano", col_entidade])
     total = len(df)
+    jsons = df_para_json_bulk(df, excluir=["_ano"])
 
-    inseridos = 0
-    with engine.begin() as conn:
+    data = [
+        (int(row["_ano"]), int(row[col_entidade]), jsons[i])
+        for i, (_, row) in enumerate(df.iterrows())
+    ]
+
+    sql = f"""
+        INSERT INTO {tabela} (ano, co_entidade, dados_json) VALUES %s
+        ON CONFLICT (ano, co_entidade) DO UPDATE SET dados_json = EXCLUDED.dados_json
+    """
+
+    raw_conn, cursor = _raw_cursor()
+    try:
         for i in range(0, total, TAMANHO_LOTE):
-            lote = df.iloc[i: i + TAMANHO_LOTE]
-            registros = []
-            for _, row in lote.iterrows():
-                dados = {k: v for k, v in row.items() if k != "_ano"}
-                registros.append({
-                    "ano":         int(row["_ano"]),
-                    "co_entidade": int(row[col_entidade]),
-                    "dados_json":  row_para_json(pd.Series(dados)),
-                })
-            conn.execute(text(f"""
-                INSERT INTO {tabela} (ano, co_entidade, dados_json)
-                VALUES (:ano, :co_entidade, CAST(:dados_json AS jsonb))
-                ON CONFLICT (ano, co_entidade) DO UPDATE SET
-                    dados_json = EXCLUDED.dados_json
-            """), registros)
-            inseridos += len(registros)
-            print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")
+            execute_values(cursor, sql, data[i: i + TAMANHO_LOTE],
+                           template="(%s,%s,%s::jsonb)", page_size=TAMANHO_LOTE)
+            print(f"  Progresso: {min(i + TAMANHO_LOTE, total):,}/{total:,}", end="\r")
+        raw_conn.commit()
+    finally:
+        cursor.close()
+        raw_conn.close()
 
-    return inseridos
+    return total
 
 
 def importar_multiplos(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
@@ -316,31 +330,29 @@ def importar_multiplos(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
 
     total = len(df)
     anos = df["_ano"].dropna().unique().tolist()
+    jsons = df_para_json_bulk(df, excluir=["_ano"])
 
-    inseridos = 0
-    with engine.begin() as conn:
-        # Apaga registros existentes do mesmo ano para evitar duplicatas
+    data = [
+        (int(row["_ano"]), int(row[col_entidade]), jsons[i])
+        for i, (_, row) in enumerate(df.iterrows())
+    ]
+
+    sql = f"INSERT INTO {tabela} (ano, co_entidade, dados_json) VALUES %s"
+
+    raw_conn, cursor = _raw_cursor()
+    try:
         for ano in anos:
-            conn.execute(text(f"DELETE FROM {tabela} WHERE ano = :ano"), {"ano": int(ano)})
-
+            cursor.execute(f"DELETE FROM {tabela} WHERE ano = %s", (int(ano),))
         for i in range(0, total, TAMANHO_LOTE):
-            lote = df.iloc[i: i + TAMANHO_LOTE]
-            registros = []
-            for _, row in lote.iterrows():
-                dados = {k: v for k, v in row.items() if k != "_ano"}
-                registros.append({
-                    "ano":         int(row["_ano"]),
-                    "co_entidade": int(row[col_entidade]),
-                    "dados_json":  row_para_json(pd.Series(dados)),
-                })
-            conn.execute(text(f"""
-                INSERT INTO {tabela} (ano, co_entidade, dados_json)
-                VALUES (:ano, :co_entidade, CAST(:dados_json AS jsonb))
-            """), registros)
-            inseridos += len(registros)
-            print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")
+            execute_values(cursor, sql, data[i: i + TAMANHO_LOTE],
+                           template="(%s,%s,%s::jsonb)", page_size=TAMANHO_LOTE)
+            print(f"  Progresso: {min(i + TAMANHO_LOTE, total):,}/{total:,}", end="\r")
+        raw_conn.commit()
+    finally:
+        cursor.close()
+        raw_conn.close()
 
-    return inseridos
+    return total
 
 
 # ---------------------------------------------------------------------------
