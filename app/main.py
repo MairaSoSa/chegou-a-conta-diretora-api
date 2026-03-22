@@ -2480,6 +2480,7 @@ def buscar_censo_escola_ano(co_entidade: int, ano: int):
             text("""
                 SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
                        sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+                       ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone,
                        dados_json
                 FROM censo_escola_historico
                 WHERE co_entidade = :co_entidade AND ano = :ano
@@ -2507,6 +2508,11 @@ def buscar_censo_escola_ano(co_entidade: int, ano: int):
             "tp_dependencia": row["tp_dependencia"],
             "tp_localizacao": row["tp_localizacao"],
             "tp_situacao_funcionamento": row["tp_situacao_funcionamento"],
+            "ds_endereco": row["ds_endereco"],
+            "no_bairro": row["no_bairro"],
+            "co_cep": row["co_cep"],
+            "nu_ddd": row["nu_ddd"],
+            "nu_telefone": row["nu_telefone"],
             **(row["dados_json"] if row["dados_json"] else {}),
         },
     }

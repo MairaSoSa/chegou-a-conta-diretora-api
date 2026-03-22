@@ -58,6 +58,12 @@ MAPA_COLUNAS_ESCOLA = {
     "tp_dependencia":            ["TP_DEPENDENCIA", "TP_DEP_ADM_ESCOLA"],
     "tp_localizacao":            ["TP_LOCALIZACAO", "TP_LOC_ESCOLA"],
     "tp_situacao_funcionamento": ["TP_SITUACAO_FUNCIONAMENTO"],
+    # Endereço
+    "ds_endereco":               ["DS_ENDERECO", "DS_END_ESCOLA", "LOGRADOURO"],
+    "no_bairro":                 ["NO_BAIRRO", "DS_BAIRRO", "BAIRRO"],
+    "co_cep":                    ["CO_CEP", "NU_CEP", "CEP"],
+    "nu_ddd":                    ["NU_DDD", "DDD"],
+    "nu_telefone":               ["NU_TELEFONE", "TELEFONE"],
 }
 
 COLUNAS_ANO = ["NU_ANO_CENSO", "AN_CENSO", "NU_ANO", "ANO_CENSO"]
@@ -198,13 +204,18 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
     def gc(campo):
         return resolver_coluna(cols, MAPA_COLUNAS_ESCOLA[campo])
 
-    col_no  = gc("no_entidade")
-    col_mun = gc("co_municipio")
-    col_nom = gc("no_municipio")
-    col_uf  = gc("sg_uf")
-    col_dep = gc("tp_dependencia")
-    col_loc = gc("tp_localizacao")
-    col_sit = gc("tp_situacao_funcionamento")
+    col_no   = gc("no_entidade")
+    col_mun  = gc("co_municipio")
+    col_nom  = gc("no_municipio")
+    col_uf   = gc("sg_uf")
+    col_dep  = gc("tp_dependencia")
+    col_loc  = gc("tp_localizacao")
+    col_sit  = gc("tp_situacao_funcionamento")
+    col_end  = gc("ds_endereco")
+    col_bai  = gc("no_bairro")
+    col_cep  = gc("co_cep")
+    col_ddd  = gc("nu_ddd")
+    col_tel  = gc("nu_telefone")
 
     inseridos = 0
     with engine.begin() as conn:
@@ -223,16 +234,23 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
                     "tp_dependencia":             val_int(row, col_dep),
                     "tp_localizacao":             val_int(row, col_loc),
                     "tp_situacao_funcionamento":  val_int(row, col_sit),
+                    "ds_endereco":                val_str(row, col_end),
+                    "no_bairro":                  val_str(row, col_bai),
+                    "co_cep":                     val_str(row, col_cep),
+                    "nu_ddd":                     val_str(row, col_ddd),
+                    "nu_telefone":                val_str(row, col_tel),
                     "dados_json":                 row_para_json(pd.Series(dados)),
                 })
             conn.execute(text("""
                 INSERT INTO censo_escola_historico (
                     ano, co_entidade, no_entidade, co_municipio, no_municipio,
                     sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+                    ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone,
                     dados_json
                 ) VALUES (
                     :ano, :co_entidade, :no_entidade, :co_municipio, :no_municipio,
                     :sg_uf, :tp_dependencia, :tp_localizacao, :tp_situacao_funcionamento,
+                    :ds_endereco, :no_bairro, :co_cep, :nu_ddd, :nu_telefone,
                     CAST(:dados_json AS jsonb)
                 )
                 ON CONFLICT (ano, co_entidade) DO UPDATE SET
@@ -243,6 +261,11 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
                     tp_dependencia            = EXCLUDED.tp_dependencia,
                     tp_localizacao            = EXCLUDED.tp_localizacao,
                     tp_situacao_funcionamento = EXCLUDED.tp_situacao_funcionamento,
+                    ds_endereco               = EXCLUDED.ds_endereco,
+                    no_bairro                 = EXCLUDED.no_bairro,
+                    co_cep                    = EXCLUDED.co_cep,
+                    nu_ddd                    = EXCLUDED.nu_ddd,
+                    nu_telefone               = EXCLUDED.nu_telefone,
                     dados_json                = EXCLUDED.dados_json
             """), registros)
             inseridos += len(registros)
