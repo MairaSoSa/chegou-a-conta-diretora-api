@@ -23,4 +23,8 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     connect_args=connect_args,
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=10,
+    pool_recycle=3600,
 )
