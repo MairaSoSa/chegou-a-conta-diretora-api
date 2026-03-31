@@ -2629,3 +2629,61 @@ def buscar_turmas(
 def buscar_cursos_tecnicos(co_entidade: int, ano: Optional[int] = Query(None)):
     """Dados de cursos técnicos de uma escola. Use ?ano= para filtrar por ano específico."""
     return _endpoint_upsert_tabela("curso_tecnico_escola", co_entidade, ano)
+
+
+# ---------------------------------------------------------------------------
+# INDICADORES SEM ENDPOINT DEDICADO
+# ---------------------------------------------------------------------------
+
+@app.get("/atu/{co_entidade}")
+def buscar_atu(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Adequação da Formação Docente (ATU). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("atu_escola", co_entidade, ano)
+
+
+@app.get("/had/{co_entidade}")
+def buscar_had(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Horas-Aula Diárias (HAD). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("had_escola", co_entidade, ano)
+
+
+@app.get("/ied/{co_entidade}")
+def buscar_ied(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Indicador de Esforço Docente (IED). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("ied_escola", co_entidade, ano)
+
+
+@app.get("/tdi/{co_entidade}")
+def buscar_tdi(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Taxa de Distorção Idade-Série (TDI). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("tdi_escola", co_entidade, ano)
+
+
+@app.get("/ird/{co_entidade}")
+def buscar_ird(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Irregularidade de Rendimento Docente (IRD). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("ird_escola", co_entidade, ano)
+
+
+@app.get("/icg/{co_entidade}")
+def buscar_icg(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Índice de Complexidade de Gestão (ICG). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("icg_escola", co_entidade, ano)
+
+
+@app.get("/tnr/{co_entidade}")
+def buscar_tnr(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Taxa de Nível de Rendimento (TNR). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("tnr_escola", co_entidade, ano)
+
+
+@app.get("/inse/{co_entidade}")
+def buscar_inse(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Índice Socioeconômico (INSE). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("inse_escola", co_entidade, ano)
+
+
+@app.get("/rendimento/{co_entidade}")
+def buscar_rendimento(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Rendimento Escolar (aprovação, reprovação, abandono). Use ?ano= para filtrar por ano."""
+    return _endpoint_upsert_tabela("rendimento_escola", co_entidade, ano)
