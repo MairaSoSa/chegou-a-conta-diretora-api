@@ -111,12 +111,14 @@ def row_para_json(row: pd.Series) -> str:
 
 
 def df_para_json_bulk(df: pd.DataFrame, excluir: list) -> list:
-    """Converte todas as linhas do df para lista de JSON strings de forma vetorizada."""
+    """Converte todas as linhas do df para lista de JSON strings.
+    Usa itertuples (evita criar Series por linha como iterrows) e não gera string JSON gigante intermediária."""
     cols_drop = [c for c in excluir if c in df.columns]
-    records = df.drop(columns=cols_drop).to_dict(orient="records")
+    df_clean = df.drop(columns=cols_drop).replace([np.inf, -np.inf], None)
+    cols = df_clean.columns.tolist()
     return [
-        json.dumps({k: limpar_valor(v) for k, v in r.items()}, ensure_ascii=False, default=str)
-        for r in records
+        json.dumps(dict(zip(cols, row)), ensure_ascii=False, default=str)
+        for row in df_clean.itertuples(index=False, name=None)
     ]
 
 
@@ -210,6 +212,123 @@ def preparar_df(df: pd.DataFrame, caminho: Path):
 # Importadores por tipo
 # ---------------------------------------------------------------------------
 
+def importar_escola_streaming(caminho: Path) -> int:
+    """Importa censo_escola_historico lendo o CSV em chunks — ideal para arquivos >100MB.
+    Cada chunk de TAMANHO_LOTE linhas é processado e inserido separadamente,
+    evitando carga total em memória. Chamado automaticamente por processar_arquivo."""
+    SQL_ESCOLA = _SQL_ESCOLA_UPSERT
+    total = 0
+    raw_conn, cursor = _raw_cursor()
+    try:
+        # Tenta ler como latin1 primeiro
+        try:
+            reader = pd.read_csv(caminho, sep=";", encoding="latin1", low_memory=False,
+                                 dtype=str, chunksize=TAMANHO_LOTE)
+        except Exception:
+            reader = pd.read_csv(caminho, sep=";", encoding="utf-8", low_memory=False,
+                                 dtype=str, chunksize=TAMANHO_LOTE)
+
+        for chunk_i, df_chunk in enumerate(reader):
+            df_chunk.columns = [c.strip().upper() for c in df_chunk.columns]
+            df_chunk, col_entidade = preparar_df(df_chunk, caminho)
+            if df_chunk is None or df_chunk.empty:
+                continue
+
+            data = _montar_tuplas_escola(df_chunk, col_entidade)
+            if not data:
+                continue
+
+            execute_values(cursor, SQL_ESCOLA, data,
+                           template="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                           page_size=TAMANHO_LOTE)
+            raw_conn.commit()
+            total += len(data)
+            print(f"  chunk {chunk_i+1}: {total:,} linhas inseridas", flush=True)
+
+    finally:
+        cursor.close()
+        raw_conn.close()
+
+    return total
+
+
+_SQL_ESCOLA_UPSERT = """
+    INSERT INTO censo_escola_historico (
+        ano, co_entidade, no_entidade, co_municipio, no_municipio,
+        sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+        ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone, dados_json
+    ) VALUES %s
+    ON CONFLICT (ano, co_entidade) DO UPDATE SET
+        no_entidade               = EXCLUDED.no_entidade,
+        co_municipio              = EXCLUDED.co_municipio,
+        no_municipio              = EXCLUDED.no_municipio,
+        sg_uf                     = EXCLUDED.sg_uf,
+        tp_dependencia            = EXCLUDED.tp_dependencia,
+        tp_localizacao            = EXCLUDED.tp_localizacao,
+        tp_situacao_funcionamento = EXCLUDED.tp_situacao_funcionamento,
+        ds_endereco               = EXCLUDED.ds_endereco,
+        no_bairro                 = EXCLUDED.no_bairro,
+        co_cep                    = EXCLUDED.co_cep,
+        nu_ddd                    = EXCLUDED.nu_ddd,
+        nu_telefone               = EXCLUDED.nu_telefone,
+        dados_json                = EXCLUDED.dados_json
+"""
+
+
+def _montar_tuplas_escola(df: pd.DataFrame, col_entidade: str) -> list:
+    """Constrói a lista de tuplas para insert em censo_escola_historico (vetorizado)."""
+    cols = list(df.columns)
+    total = len(df)
+
+    def gc(campo):
+        return resolver_coluna(cols, MAPA_COLUNAS_ESCOLA[campo])
+
+    col_no  = gc("no_entidade")
+    col_mun = gc("co_municipio")
+    col_nom = gc("no_municipio")
+    col_uf  = gc("sg_uf")
+    col_dep = gc("tp_dependencia")
+    col_loc = gc("tp_localizacao")
+    col_sit = gc("tp_situacao_funcionamento")
+    col_end = gc("ds_endereco")
+    col_bai = gc("no_bairro")
+    col_cep = gc("co_cep")
+    col_ddd = gc("nu_ddd")
+    col_tel = gc("nu_telefone")
+
+    def vcol_str(col):
+        if col and col in df.columns:
+            s = df[col].astype(str).str.strip()
+            return s.where((s != "") & (s != "nan") & (s != "None") & df[col].notna(), other=None).tolist()
+        return [None] * total
+
+    def vcol_int(col):
+        if col and col in df.columns:
+            n = pd.to_numeric(df[col], errors="coerce")
+            return [int(v) if pd.notna(v) else None for v in n]
+        return [None] * total
+
+    df_j = df.where(df.notna(), other=None)
+    jcols = df_j.columns.tolist()
+    jsons = [
+        json.dumps(
+            {k: (None if isinstance(v, float) and v != v else v) for k, v in zip(jcols, row)},
+            ensure_ascii=False, default=str,
+        )
+        for row in df_j.itertuples(index=False, name=None)
+    ]
+
+    return list(zip(
+        [int(v) for v in df["_ano"].tolist()],
+        [int(v) for v in df[col_entidade].tolist()],
+        vcol_str(col_no), vcol_int(col_mun), vcol_str(col_nom), vcol_str(col_uf),
+        vcol_int(col_dep), vcol_int(col_loc), vcol_int(col_sit),
+        vcol_str(col_end), vcol_str(col_bai), vcol_str(col_cep),
+        vcol_str(col_ddd), vcol_str(col_tel),
+        jsons,
+    ))
+
+
 def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
     """Importa para censo_escola_historico com todos os campos estruturados + dados_json."""
     df, col_entidade = preparar_df(df, caminho)
@@ -236,8 +355,41 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
     col_ddd  = gc("nu_ddd")
     col_tel  = gc("nu_telefone")
 
-    # Constrói JSON de todas as linhas de uma vez (muito mais rápido que iterrows)
+    # Funções vetorizadas para extrair colunas sem iterrows
+    def vcol_str(col):
+        if col and col in df.columns:
+            s = df[col].astype(str).str.strip()
+            return s.where((s != "") & (s != "nan") & df[col].notna(), other=None).tolist()
+        return [None] * total
+
+    def vcol_int(col):
+        if col and col in df.columns:
+            n = pd.to_numeric(df[col], errors="coerce")
+            return [int(v) if pd.notna(v) else None for v in n]
+        return [None] * total
+
+    # Constrói JSON de todas as linhas de uma vez (C nativo via pandas)
+    print(f"  Construindo JSON para {total:,} linhas...", flush=True)
     jsons = df_para_json_bulk(df, excluir=["_ano"])
+
+    anos       = [int(v) for v in df["_ano"].tolist()]
+    entidades  = [int(v) for v in df[col_entidade].tolist()]
+    no_ents    = vcol_str(col_no)
+    co_muns    = vcol_int(col_mun)
+    no_muns    = vcol_str(col_nom)
+    sg_ufs     = vcol_str(col_uf)
+    tp_deps    = vcol_int(col_dep)
+    tp_locs    = vcol_int(col_loc)
+    tp_sits    = vcol_int(col_sit)
+    ds_ends    = vcol_str(col_end)
+    no_bais    = vcol_str(col_bai)
+    co_ceps    = vcol_str(col_cep)
+    nu_ddds    = vcol_str(col_ddd)
+    nu_tels    = vcol_str(col_tel)
+
+    data = list(zip(anos, entidades, no_ents, co_muns, no_muns, sg_ufs,
+                    tp_deps, tp_locs, tp_sits, ds_ends, no_bais, co_ceps,
+                    nu_ddds, nu_tels, jsons))
 
     SQL_ESCOLA = """
         INSERT INTO censo_escola_historico (
@@ -261,26 +413,14 @@ def importar_escola(df: pd.DataFrame, caminho: Path) -> int:
             dados_json                = EXCLUDED.dados_json
     """
 
-    data = [
-        (
-            int(row["_ano"]), int(row[col_entidade]),
-            val_str(row, col_no), val_int(row, col_mun), val_str(row, col_nom),
-            val_str(row, col_uf), val_int(row, col_dep), val_int(row, col_loc),
-            val_int(row, col_sit), val_str(row, col_end), val_str(row, col_bai),
-            val_str(row, col_cep), val_str(row, col_ddd), val_str(row, col_tel),
-            jsons[i],
-        )
-        for i, (_, row) in enumerate(df.iterrows())
-    ]
-
+    print(f"  Inserindo no banco...", flush=True)
     raw_conn, cursor = _raw_cursor()
     try:
         for i in range(0, total, TAMANHO_LOTE):
             execute_values(cursor, SQL_ESCOLA, data[i: i + TAMANHO_LOTE],
                            template="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
                            page_size=TAMANHO_LOTE)
-            inseridos = min(i + TAMANHO_LOTE, total)
-            print(f"  Progresso: {inseridos:,}/{total:,}", end="\r")
+            print(f"  Inserido: {min(i + TAMANHO_LOTE, total):,}/{total:,}", flush=True)
         raw_conn.commit()
     finally:
         cursor.close()
@@ -299,10 +439,9 @@ def importar_upsert(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
     total = len(df)
     jsons = df_para_json_bulk(df, excluir=["_ano"])
 
-    data = [
-        (int(row["_ano"]), int(row[col_entidade]), jsons[i])
-        for i, (_, row) in enumerate(df.iterrows())
-    ]
+    anos      = [int(v) for v in df["_ano"].tolist()]
+    entidades = [int(v) for v in df[col_entidade].tolist()]
+    data      = list(zip(anos, entidades, jsons))
 
     sql = f"""
         INSERT INTO {tabela} (ano, co_entidade, dados_json) VALUES %s
@@ -314,7 +453,7 @@ def importar_upsert(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
         for i in range(0, total, TAMANHO_LOTE):
             execute_values(cursor, sql, data[i: i + TAMANHO_LOTE],
                            template="(%s,%s,%s::jsonb)", page_size=TAMANHO_LOTE)
-            print(f"  Progresso: {min(i + TAMANHO_LOTE, total):,}/{total:,}", end="\r")
+            print(f"  Inserido: {min(i + TAMANHO_LOTE, total):,}/{total:,}", flush=True)
         raw_conn.commit()
     finally:
         cursor.close()
@@ -330,25 +469,24 @@ def importar_multiplos(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
     if df is None:
         return 0
 
-    total = len(df)
-    anos = df["_ano"].dropna().unique().tolist()
-    jsons = df_para_json_bulk(df, excluir=["_ano"])
+    total     = len(df)
+    anos_uniq = [int(v) for v in df["_ano"].dropna().unique().tolist()]
+    jsons     = df_para_json_bulk(df, excluir=["_ano"])
 
-    data = [
-        (int(row["_ano"]), int(row[col_entidade]), jsons[i])
-        for i, (_, row) in enumerate(df.iterrows())
-    ]
+    anos      = [int(v) for v in df["_ano"].tolist()]
+    entidades = [int(v) for v in df[col_entidade].tolist()]
+    data      = list(zip(anos, entidades, jsons))
 
     sql = f"INSERT INTO {tabela} (ano, co_entidade, dados_json) VALUES %s"
 
     raw_conn, cursor = _raw_cursor()
     try:
-        for ano in anos:
-            cursor.execute(f"DELETE FROM {tabela} WHERE ano = %s", (int(ano),))
+        for ano in anos_uniq:
+            cursor.execute(f"DELETE FROM {tabela} WHERE ano = %s", (ano,))
         for i in range(0, total, TAMANHO_LOTE):
             execute_values(cursor, sql, data[i: i + TAMANHO_LOTE],
                            template="(%s,%s,%s::jsonb)", page_size=TAMANHO_LOTE)
-            print(f"  Progresso: {min(i + TAMANHO_LOTE, total):,}/{total:,}", end="\r")
+            print(f"  Inserido: {min(i + TAMANHO_LOTE, total):,}/{total:,}", flush=True)
         raw_conn.commit()
     finally:
         cursor.close()
@@ -382,6 +520,13 @@ def processar_arquivo(caminho: Path) -> int:
     print(f"\n→ {caminho.name}")
     print(f"  Tipo: {tipo} | Tabela destino: {tabela}")
 
+    # Arquivos de escola podem ser muito grandes (>100MB) — usa streaming por chunks
+    if tipo == "escola":
+        print(f"  Usando importação em streaming (arquivo grande)...", flush=True)
+        n = importar_escola_streaming(caminho)
+        print(f"\n  ✓ {n:,} registros salvos em '{tabela}'")
+        return n
+
     df = ler_csv(caminho)
     if df is None or df.empty:
         return 0
@@ -397,10 +542,7 @@ def processar_arquivo(caminho: Path) -> int:
 
     print(f"  {anos_str}Colunas: {len(df.columns)} | Linhas: {len(df):,}")
 
-    if tipo in ("escola",):
-        n = fn_importar(df, caminho)
-    else:
-        n = fn_importar(df, caminho, tabela)
+    n = fn_importar(df, caminho, tabela)
 
     print(f"\n  ✓ {n:,} registros salvos em '{tabela}'")
     return n

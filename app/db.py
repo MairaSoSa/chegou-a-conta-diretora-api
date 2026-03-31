@@ -1,7 +1,11 @@
 import os
 from sqlalchemy import create_engine
 
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
+DATABASE_URL = (
+    os.getenv("RAILWAY_DATABASE_URL")
+    or os.getenv("DATABASE_URL")
+    or os.getenv("DATABASE_PUBLIC_URL")
+)
 
 if not DATABASE_URL:
     raise ValueError(

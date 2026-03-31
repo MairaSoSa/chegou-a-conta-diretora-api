@@ -1,60 +1,90 @@
 # Chegou a Conta Diretora - API de Dados Educacionais
 
 ## Overview
-A public FastAPI REST API providing educational data about Brazilian schools. Built with Python/FastAPI and PostgreSQL.
+Public FastAPI REST API providing Brazilian school educational data (Censo Escolar, IDEB, INSE, AFD, and other INEP indicators). Built with Python/FastAPI and PostgreSQL.
 
 ## Architecture
 - **Framework**: FastAPI (Python 3.12)
-- **Database**: PostgreSQL (via SQLAlchemy + psycopg2)
+- **Database**: Railway PostgreSQL (external) — accessed via `RAILWAY_DATABASE_URL` env var
 - **Server**: Uvicorn
 - **Port**: 5000
 
 ## Project Structure
 ```
 app/
-  main.py       # FastAPI app with all route definitions
-  db.py         # SQLAlchemy engine setup (reads DATABASE_URL)
+  main.py       # FastAPI app with all route definitions (~2700 lines, 40+ endpoints)
+  db.py         # SQLAlchemy engine setup — reads RAILWAY_DATABASE_URL → DATABASE_URL → DATABASE_PUBLIC_URL
 database/
-  recreate_views.sql   # SQL views (vw_raiox_escola, vw_escola_indicadores, etc.)
+  recreate_views.sql        # SQL views
+  migration_endereco.sql    # Adds address columns to censo_escola_historico
 ingestion/
-  db_config.py         # DB connection helpers for ingestion scripts
-  import_*.py          # Data ingestion scripts for each indicator
-requirements.txt       # Python dependencies
+  db_config.py              # DB connection helpers for ingestion scripts
+  import_censo_completo.py  # Main Censo Escolar import (all types, streaming for escola)
+  import_censo_historico.py # Legacy import script
+requirements.txt            # Python dependencies
+extracted/
+  2024/
+    microdados_ed_basica_2024.csv  # 218MB, 215,545 rows, 426 columns (downloaded from INEP)
 ```
 
-## Database Schema
-The API relies on these tables (created via ingestion scripts):
-- `escolas` - Base school registry
-- `censo_escola_historico` - Census history per school per year
-- `inse_escola` - Socioeconomic index (INSE)
-- `ideb_escola` - IDEB scores
-- `ideb_escola_historico` - Historical IDEB with computed scores
+## Database — Railway PostgreSQL
+Connection: `postgresql://postgres:fGOMFFDHZRqNDuMQdBUAgtUEQpuurxlv@hopper.proxy.rlwy.net:24550/railway`
+Set via env var: `RAILWAY_DATABASE_URL`
+
+### Tables
+- `censo_escola_historico` - Census history per school per year (215,545 rows of 2024 data with full 426-column JSON + address fields)
+- `inse_escola` - Socioeconomic index (2021–2023)
+- `ideb_escola`, `ideb_escola_historico` - IDEB scores
 - `afd_escola`, `atu_escola`, `had_escola`, `icg_escola`, `ied_escola`, `ird_escola`, `tdi_escola`, `tnr_escola`, `rendimento_escola` - Various school indicators
+- `matricula_escola`, `docente_escola`, `turma_escola`, `gestor_escolar`, `curso_tecnico_escola` - 2025 data only
 
-Views (defined in `database/recreate_views.sql`):
-- `vw_escola_ideb` - Consolidated IDEB view
-- `vw_escola_indicadores` - All indicators per school per year
-- `vw_raiox_escola` - Latest snapshot per school
-- `vw_raiox_escola_publica` - Public schools only
-- `vw_escolas_mapa` - Map-ready data
-- `vw_ufs`, `vw_municipios`, `vw_ufs_publicas`, `vw_municipios_publicos` - Geographic lookups
+### censo_escola_historico schema (key columns)
+- `ano`, `co_entidade` (PK)
+- `no_entidade`, `co_municipio`, `no_municipio`, `sg_uf`
+- `tp_dependencia`, `tp_localizacao`, `tp_situacao_funcionamento`
+- `ds_endereco`, `no_bairro`, `co_cep`, `nu_ddd`, `nu_telefone` (address — added in migration_endereco.sql)
+- `dados_json` JSONB — full 426-column census record
 
-## API Endpoints
-- `GET /` - Health check
-- `GET /documentacao` - Swagger UI
-- `GET /guia-api` - ReDoc UI
-- `GET /escolas/{co_entidade}` - School snapshot (raio-x)
-- `GET /escolas/{co_entidade}/historico` - Full indicator history
-- `GET /escolas/{co_entidade}/ideb` - IDEB data
-- And many more...
+### Data status
+- **2024**: 215,545 schools — full 426 columns + address fields ✅
+- **2020–2023**: exists but only ~10 fields in dados_json (old import script) — needs reimport
+- **2025**: from Tabela_Escola_2025.csv — structured fields only (no dados_json)
+
+## API Endpoints (40+)
+- `GET /` — Health check
+- `GET /documentacao` — Swagger UI
+- `GET /guia-api` — ReDoc UI
+- `GET /censo/{co_entidade}/{ano}` — Full census data for a school in a year (438 fields for 2024)
+- `GET /censo/{co_entidade}` — All years of census data for a school
+- `GET /escolas/{co_entidade}` — School snapshot (raio-x)
+- `GET /escolas/{co_entidade}/historico` — Full indicator history
+- `GET /matricula/{co_entidade}` — Enrollment data
+- `GET /gestor/{co_entidade}` — School manager data
+- `GET /docentes/{co_entidade}` — Teacher data
+- `GET /turmas/{co_entidade}` — Class data
+- `GET /inse/{co_entidade}` — Socioeconomic index
+- `GET /atu/{co_entidade}`, `/had`, `/ied`, `/tdi`, `/ird`, `/icg`, `/tnr` — Various indicators
+- `GET /rendimento/{co_entidade}` — School performance data
+- And many more geographic/aggregate endpoints
 
 ## Environment Variables
-- `DATABASE_URL` - PostgreSQL connection string (set automatically by Replit)
+- `RAILWAY_DATABASE_URL` — Railway PostgreSQL URL (takes precedence)
+- `DATABASE_URL` — Replit managed local PostgreSQL (fallback)
 
-## Development Notes
-- Tables are created empty; ingestion scripts expect CSV/Excel files in `extracted/` folder
-- Views are defined in `database/recreate_views.sql` and must be re-applied after schema changes
-- To recreate views: `psql "$DATABASE_URL" -f database/recreate_views.sql`
+## Ingestion Scripts
+### import_censo_completo.py
+- Auto-detects file type from filename (escola/matricula/docente/turma/gestor/curso_tecnico)
+- Escola files: uses streaming chunk reader (10K rows/chunk) to handle 218MB+ files
+- Other types: reads full DataFrame (smaller files)
+- Usage: `DATABASE_URL="postgresql://..." python3 ingestion/import_censo_completo.py`
+- Expects CSV files in `extracted/` directory (any subdirectory)
+
+## Key Technical Notes
+- `importar_escola_streaming()` reads CSV in 10K-row chunks to avoid OOM with 218MB files
+- Each chunk: ~3s JSON building (itertuples) + ~30s Railway insert = ~33s/10K rows
+- NaN values in CSV are replaced with null (JSON) before serialization
+- Address columns migrated via `database/migration_endereco.sql`
+- `gdown` installed for downloading from Google Drive (MEC data)
 
 ## Deployment
 - Target: autoscale
