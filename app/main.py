@@ -2475,18 +2475,32 @@ def buscar_censo_escola_ano(co_entidade: int, ano: int):
     """
     Retorna todos os dados do Censo Escolar de uma escola em um ano específico.
     """
+    SQL_COMPLETO = text("""
+        SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
+               sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+               ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone,
+               dados_json
+        FROM censo_escola_historico
+        WHERE co_entidade = :co_entidade AND ano = :ano
+    """)
+    SQL_BASICO = text("""
+        SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
+               sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
+               NULL::text AS ds_endereco, NULL::text AS no_bairro,
+               NULL::text AS co_cep, NULL::text AS nu_ddd, NULL::text AS nu_telefone,
+               dados_json
+        FROM censo_escola_historico
+        WHERE co_entidade = :co_entidade AND ano = :ano
+    """)
+    params = {"co_entidade": co_entidade, "ano": ano}
+
+    row = None
     with engine.connect() as conn:
-        row = conn.execute(
-            text("""
-                SELECT ano, co_entidade, no_entidade, co_municipio, no_municipio,
-                       sg_uf, tp_dependencia, tp_localizacao, tp_situacao_funcionamento,
-                       ds_endereco, no_bairro, co_cep, nu_ddd, nu_telefone,
-                       dados_json
-                FROM censo_escola_historico
-                WHERE co_entidade = :co_entidade AND ano = :ano
-            """),
-            {"co_entidade": co_entidade, "ano": ano},
-        ).mappings().first()
+        try:
+            row = conn.execute(SQL_COMPLETO, params).mappings().first()
+        except Exception:
+            conn.rollback()
+            row = conn.execute(SQL_BASICO, params).mappings().first()
 
     if not row:
         return {
@@ -2609,3 +2623,9 @@ def buscar_turmas(
 ):
     """Lista de turmas de uma escola. Use ?ano= para filtrar por ano."""
     return _endpoint_multiplos_tabela("turma_escola", co_entidade, ano, limit, offset)
+
+
+@app.get("/cursos-tecnicos/{co_entidade}")
+def buscar_cursos_tecnicos(co_entidade: int, ano: Optional[int] = Query(None)):
+    """Dados de cursos técnicos de uma escola. Use ?ano= para filtrar por ano específico."""
+    return _endpoint_upsert_tabela("curso_tecnico_escola", co_entidade, ano)

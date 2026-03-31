@@ -160,7 +160,7 @@ def ler_csv(caminho: Path) -> pd.DataFrame | None:
 
 
 def detectar_tipo(caminho: Path) -> str:
-    """Retorna o tipo de arquivo: escola | matricula | docente | turma | gestor | desconhecido"""
+    """Retorna o tipo de arquivo: escola | matricula | docente | turma | gestor | curso_tecnico | desconhecido"""
     nome = caminho.name.lower()
     if "tabela_escola" in nome or "microdados_ed_basica" in nome:
         return "escola"
@@ -172,6 +172,8 @@ def detectar_tipo(caminho: Path) -> str:
         return "turma"
     if "gestor" in nome:
         return "gestor"
+    if "curso_tecnico" in nome or "suplemento_cursos_tecnicos" in nome:
+        return "curso_tecnico"
     return "desconhecido"
 
 
@@ -360,11 +362,12 @@ def importar_multiplos(df: pd.DataFrame, caminho: Path, tabela: str) -> int:
 # ---------------------------------------------------------------------------
 
 ROTEADOR = {
-    "escola":    ("censo_escola_historico", importar_escola),
-    "matricula": ("matricula_escola",       importar_upsert),
-    "gestor":    ("gestor_escolar",         importar_upsert),
-    "docente":   ("docente_escola",         importar_multiplos),
-    "turma":     ("turma_escola",           importar_multiplos),
+    "escola":        ("censo_escola_historico", importar_escola),
+    "matricula":     ("matricula_escola",       importar_upsert),
+    "gestor":        ("gestor_escolar",         importar_upsert),
+    "docente":       ("docente_escola",         importar_multiplos),
+    "turma":         ("turma_escola",           importar_multiplos),
+    "curso_tecnico": ("curso_tecnico_escola",   importar_upsert),
 }
 
 
